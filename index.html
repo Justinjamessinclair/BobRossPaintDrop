@@ -13,7 +13,7 @@
     #mainScreen .settings-panel label { display:flex; justify-content:space-between; align-items:center; font-size:1rem; color:#333; margin:6px 0; }
     #mainScreen .settings-panel input[type="range"] { width:90px; }
     #mainScreen .settings-panel input[type="checkbox"] { transform:scale(1.2); margin-left:8px; }
-    #feedback { position:fixed; left:50%; top:80px; transform:translateX(-50%); background:#222; color:#fff; font-size:1.2rem; padding:8px 22px; border-radius:12px; box-shadow:0 2px 8px #0002; z-index:20; pointer-events:none; opacity:0; transition:opacity 0.4s; }
+    #feedback { position:fixed; left:50%; top:80px; transform:translateX(-50%) scale(0.8); background:rgba(34,34,34,0.6); color:#fff; font-size:1rem; padding:6px 16px; border-radius:12px; box-shadow:0 2px 8px #0002; z-index:20; pointer-events:none; opacity:0; transition:opacity 0.4s, transform 0.2s; }
     #feedback:not(.hidden) { opacity:1; }
     #hud { position:fixed; top:0; left:50%; transform:translateX(-50%); width:90%; max-width:600px; height:60px; background:rgba(255,255,255,0.95); display:flex; justify-content:center; align-items:center; gap:8px; padding:0 10px; box-sizing:border-box; border-bottom:1px solid #ccc; border-radius:0 0 10px 10px; z-index:4; }
     #hud div { font-size:14px; color:#222; display:flex; align-items:center; gap:4px; }
@@ -108,6 +108,7 @@
       font-size: 1.15rem;
       font-weight: 600;
       margin: 0 0 10px 0;
+      margin-top: 1em;
       color: #333;
       letter-spacing: 0.01em;
     }
@@ -311,6 +312,7 @@
     </div>
   </div>
   <canvas id="gameCanvas" width="600" height="800"></canvas>
+  <div id="trackpad">Touch here to move the brush 🎨</div>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       // --- DOM refs ---
@@ -337,18 +339,22 @@
       const canvas = document.getElementById('gameCanvas');
       const ctx = canvas.getContext('2d');
       const feedback = document.getElementById('feedback');
+      const trackpad = document.getElementById('trackpad');
 
       // --- State ---
       let savedHighScore = parseInt(localStorage.getItem('highScore')) || 0;
       let state = {
         score: 0,
+        xpMultiplier: 1,
         lives: 3,
         maxLives: 3,
         xp: 0,
+        totalXP: 0,
+        xpProgress: 0,
         level: 1,
         streak: 0,
-        fallSpeed: 1.0,
-        baseSpawn: 600,
+        fallSpeed: 2.0,
+        baseSpawn: 500,
         lastSpawn: 0,
         paused: false,
         started: false,
@@ -356,8 +362,27 @@
         missPenalty: false
       };
       let gameLoopId, lastTime = 0;
-      const colors = ['#e74c3c','#2ecc71','#3498db','#f1c40f'];
+      const colors = [
+  '#f44336', // Red
+  '#ff9800', // Orange
+  '#ffeb3b', // Yellow
+  '#4caf50', // Green
+  '#2196f3',  // Blue
+  '#6A3094', // Purple
+];
+const dropGradients = [
+  { top: '#ff7961', main: '#f44336', shadow: '#b71c1c' }, // Red
+  { top: '#ffd180', main: '#ff9800', shadow: '#e65100' }, // Orange
+  { top: '#fffde7', main: '#ffeb3b', shadow: '#fbc02d' }, // Yellow
+  { top: '#b9f6ca', main: '#4caf50', shadow: '#1b5e20' }, // Green
+  { top: '#82b1ff', main: '#2196f3', shadow: '#0d47a1' }, // Blue
+  { top: '#8763AA', main: '#6A3094', shadow: '#7B5E99' }, // Purple
+];
       let targetColor = colors[0];
+
+      // --- Slow-mo palette drop state ---
+      let slowMoTimeout = null;
+      let slowMoActive = false;
 
       // --- Controls Instructions ---
       function isMobile() {
@@ -368,16 +393,29 @@
         <ul>
           <li><b>Move:</b> <span class="kbd">←</span> <span class="kbd">→</span></li>
           <li><b>Pause:</b> <span class="kbd">Space</span></li>
-        </ul>
-        <div class="tip">Catch the <span style="font-weight:bold;">target color</span> to score. Good luck!</div>
+                  </ul>
+        <div class="tip">Catch the <span style="font-weight:bold;">target color</span> to score, catch the wrong color and lose a life!</div>
+            <h2>Power-Ups & Hazards</h2>
+  <ul>
+    <li>🎨 <b>Paint Palette:</b> Slow Motion + 2× XP</li>
+    <li>💧 <b>Water Drop:</b> Speed Burst + 2× XP</li>
+    <li>⚫️ <b>Ink Blot:</b> Lose 2 Lives</li>
       `;
       const mobileControls = `
         <h2>How to Play</h2>
         <ul>
           <li><b>Move:</b> Drag left/right</li>
           <li><b>Pause:</b> Two-finger tap</li>
+          <div class="tip">Catch the <span style="font-weight:bold;">target color</span> to score, catch the wrong color and lose a life!</div>
+            </ul>
+  <h2>Power-Ups & Hazards</h2>
+  <ul>
+    <li>🎨 <b>Paint Palette:</b> Slow Motion + 2× XP</li>
+    <li>💧 <b>Water Drop:</b> Speed Burst + 2× XP</li>
+    <li>⚫️ <b>Ink Blot:</b> Lose 2 Lives</li>
         </ul>
-        <div class="tip">Catch the <span style="font-weight:bold;">target color</span> to score. Good luck!</div>
+        
+        
       `;
 
       function updateHomeScreenContent() {
@@ -414,13 +452,12 @@
 
       // --- Game logic ---
       const catcher = {
-        w: canvas.width * 0.08,
-        h: 20,
-        r: 10,
-        x: (canvas.width - canvas.width * 0.08) / 2,
-        y: canvas.height - 40,
-        speed: 18,
-        velX: 0
+        x: canvas.width/2 - 20,
+        y: canvas.height - 80,
+        w: 40,
+        h: 80,
+        velX: 0,
+        speed: 8
       };
       const circles = [];
       const particles = [];
@@ -474,13 +511,12 @@
       }
 
       // --- Power-Ups & Obstacles ---
-      // Add new types: 'slow', 'double', 'bomb'
       function spawnCircle() {
         let roll = Math.random();
         let type = 'normal';
-        if (roll < 0.06) type = 'slow';         // 6% chance
-        else if (roll < 0.12) type = 'double';  // 6% chance
-        else if (roll < 0.18) type = 'bomb';    // 6% chance
+        if (roll < 0.06) type = 'palette'; // 6% chance: paint palette
+        else if (roll < 0.12) type = 'water'; // 6% chance: blue water drop
+        else if (roll < 0.18) type = 'bomb'; // 6% chance: black inkblot
         let baseSpd = 2 + state.score*0.05;
         circles.push({
           x: Math.random()*(canvas.width-30)+15,
@@ -488,7 +524,11 @@
           r: 15 + Math.random()*10,
           baseSpd,
           spd: baseSpd * state.fallSpeed,
-          color: type === 'slow' ? '#b39ddb' : type === 'double' ? '#4fc3f7' : type === 'bomb' ? '#222' : colors[Math.floor(Math.random()*colors.length)],
+          color: type === 'palette'
+      ? targetColor                       // ← now uses the current targetColor
+      : type === 'water' ? '#80d8ff'
+      : type === 'bomb'   ? '#222'
+      : colors[Math.floor(Math.random()*colors.length)],
           type
         });
       }
@@ -518,168 +558,125 @@
         ctx.fillStyle = grad;
         ctx.fillRect(0,0,canvas.width,canvas.height);
       }
-
-      // --- Paintbrush Catcher (Upside Down, Tip Up) ---
       function drawCatcher() {
-        ctx.save();
-        ctx.translate(catcher.x + catcher.w / 2, catcher.y + catcher.h / 2);
-        ctx.rotate(Math.PI); // Flip upside down so tip faces up
-        ctx.rotate(0.05 * Math.sin(Date.now() / 300)); // subtle wiggle
+  // 1) Position & flip so “up” is brush tip
+  ctx.save();
+  ctx.translate(catcher.x + catcher.w/2, catcher.y + catcher.h/2);
+  ctx.rotate(Math.PI);
 
-        // Handle
-        ctx.fillStyle = "#a67c52";
-        ctx.fillRect(-10, -30, 20, 40);
+  // 2) Draw wooden handle base with gradient
+  ctx.beginPath();
+  ctx.roundRect(-8, -35, 16, 45, 5);
+  let handleGrad = ctx.createLinearGradient(-8, -35, 8, 10);
+  handleGrad.addColorStop(0, '#8d6e63');
+  handleGrad.addColorStop(1, '#5d4037');
+  ctx.fillStyle = handleGrad;
+  ctx.fill();
 
-        // Ferrule (metal part)
-        ctx.fillStyle = "#b0b0b0";
-        ctx.fillRect(-10, 10, 20, 10);
+  // 3) Clip to that handle area, then draw grain & speckles
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(-8, -35, 16, 45, 5);
+  ctx.clip();
 
-        // Bristles (tip) - color matches targetColor
-        ctx.beginPath();
-        ctx.moveTo(-10, 20);
-        ctx.lineTo(0, 38 + 4 * Math.sin(Date.now() / 200));
-        ctx.lineTo(10, 20);
-        ctx.quadraticCurveTo(0, 32 + 8 * Math.sin(Date.now() / 300), -10, 20);
-        ctx.closePath();
-        ctx.fillStyle = targetColor;
-        ctx.shadowColor = targetColor;
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.restore();
-      }
+  //   a) Wavy grain lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+ctx.lineWidth = 1;
+for (let xx = -6; xx <= 6; xx += 4) {
+  ctx.beginPath();
+  let phase = Math.random() * Math.PI * 2;
+  ctx.moveTo(xx, -35);
+  // step down the handle height
+  for (let yy = -35; yy <= 10; yy += 2) {
+    // sinuous x-offset based on vertical position
+    let xOff = Math.sin(((yy + 35) / 45) * Math.PI + phase) * .5;
+    ctx.lineTo(xx + xOff, yy);
+  }
+  ctx.stroke();
+}
 
-      // --- Realistic Paint Drops, Ink Blot, Water Drop, Dream Bubble ---
-      function drawPaintDrop(x, y, r, color) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(0.04 * Math.sin(Date.now() / 300 + x));
-        // Drop shape
-        ctx.beginPath();
-        ctx.moveTo(0, -r * 1.2);
-        ctx.bezierCurveTo(r * 0.8, -r * 1.1, r, r * 0.5, 0, r * 1.1);
-        ctx.bezierCurveTo(-r, r * 0.5, -r * 0.8, -r * 1.1, 0, -r * 1.2);
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.96;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-        // Paint shine
-        ctx.beginPath();
-        ctx.ellipse(-r * 0.3, -r * 0.5, r * 0.18, r * 0.08, Math.PI / 6, 0, 2 * Math.PI);
-        ctx.fillStyle = "#fff8";
-        ctx.fill();
-        ctx.restore();
-      }
+  //   b) Tiny random speckles
+  for (let i = 0; i < 25; i++) {
+    let rx = -8 + Math.random() * 16;
+    let ry = -35 + Math.random() * 45;
+    let sz = Math.random() * 1.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(rx, ry, sz, sz);
+  }
+  ctx.restore(); // end clip
 
-      function drawInkBlot(x, y, r) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(0.1 * Math.sin(Date.now() / 180 + x));
-        ctx.beginPath();
-        for (let i = 0; i < 12; i++) {
-          let angle = (Math.PI * 2 * i) / 12;
-          let rad = r + (Math.sin(Date.now() / 100 + i * 2.1 + y) * r * 0.45);
-          ctx.lineTo(Math.cos(angle) * rad, Math.sin(angle) * rad);
-        }
-        ctx.closePath();
-        ctx.fillStyle = "#222";
-        ctx.globalAlpha = 0.93;
-        ctx.shadowColor = "#222";
-        ctx.shadowBlur = 14;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-        // Ink splatter dots
-        for (let i = 0; i < 4; i++) {
-          ctx.beginPath();
-          let angle = (Math.PI * 2 * i) / 4 + Date.now() / 900;
-          ctx.arc(Math.cos(angle) * r * 1.3, Math.sin(angle) * r * 1.3, r * 0.18, 0, 2 * Math.PI);
-          ctx.fillStyle = "#222a";
-          ctx.fill();
-        }
-        ctx.restore();
-      }
+  // 4) Draw metal ferrule
+  ctx.beginPath();
+  ctx.roundRect(-10, 10, 20, 15, 2);
+  let metalGrad = ctx.createLinearGradient(-10, 10, 10, 25);
+  metalGrad.addColorStop(.5, '#e0e0e0');
+  metalGrad.addColorStop(1, '#9e9e9e');
+  ctx.fillStyle = metalGrad;
+  ctx.fill();
 
-      function drawWaterDrop(x, y, r) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(0.1 * Math.sin(Date.now() / 300 + y));
-        ctx.beginPath();
-        ctx.moveTo(0, -r);
-        ctx.bezierCurveTo(r * 0.7, -r * 0.7, r, r * 0.7, 0, r * 1.3);
-        ctx.bezierCurveTo(-r, r * 0.7, -r * 0.7, -r * 0.7, 0, -r);
-        ctx.closePath();
-        ctx.fillStyle = "#4fc3f7";
-        ctx.globalAlpha = 0.97;
-        ctx.shadowColor = "#4fc3f7";
-        ctx.shadowBlur = 12;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-        // Water shine
-        ctx.beginPath();
-        ctx.ellipse(-r * 0.25, -r * 0.3, r * 0.18, r * 0.08, Math.PI / 6, 0, 2 * Math.PI);
-        ctx.fillStyle = "#fff8";
-        ctx.fill();
-        ctx.restore();
-      }
+  // 5) Draw the paint‐colored bristles
+  ctx.beginPath();
+  ctx.moveTo(-10, 25);
+  ctx.quadraticCurveTo(0, 45, 10, 25);
+  ctx.fillStyle = targetColor;
+  ctx.fill();
 
-      function drawDreamBubble(x, y, r) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.globalAlpha = 0.82 + 0.13 * Math.sin(Date.now() / 400 + x);
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, 2 * Math.PI);
-        ctx.fillStyle = "#b39ddb";
-        ctx.shadowColor = "#b39ddb";
-        ctx.shadowBlur = 18;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-        // Dreamy sparkles
-        for (let i = 0; i < 4; i++) {
-          ctx.beginPath();
-          let angle = (Math.PI * 2 * i) / 4 + Date.now() / 1000;
-          ctx.arc(Math.cos(angle) * r * 0.7, Math.sin(angle) * r * 0.7, r * 0.16, 0, 2 * Math.PI);
-          ctx.fillStyle = "#ede7f6";
-          ctx.fill();
-        }
-        ctx.restore();
-      }
+  // 6) Add fine hair strokes on top of the bristles
+  ctx.strokeStyle = adjustColor(targetColor, -30);
+  ctx.lineWidth = .8;
+  for (let i = 0; i < 6; i++) {
+    let tx = -8 + (16 * i/5) + (Math.random()-0.5)*1.5;
+    let ty = 15 + (Math.random()*10);
+    ctx.beginPath();
+    ctx.moveTo(tx, 20);
+    ctx.lineTo(tx + (Math.random()-0.5)*3, ty + (Math.random()*4));
+    ctx.stroke();
+  }
+
+  ctx.restore(); // back to canvas default
+}
 
       function drawCircles() {
-        circles.forEach(c => {
-          if (c.type === 'bomb') {
-            drawInkBlot(c.x, c.y, c.r);
-          } else if (c.type === 'double') {
-            drawWaterDrop(c.x, c.y, c.r * 0.95);
-          } else if (c.type === 'slow') {
-            drawDreamBubble(c.x, c.y, c.r * 0.95);
+        circles.forEach(circle => {
+          if (circle.type === 'bomb') {
+            drawInkBlot(circle.x, circle.y, circle.r);
+          } else if (circle.type === 'water') {
+            drawWaterDrop(circle.x, circle.y, circle.r);
+          } else if (circle.type === 'palette') {
+            drawPaletteDrop(circle.x, circle.y, circle.r);
           } else {
-            drawPaintDrop(c.x, c.y, c.r, c.color);
+            drawPaintDrop(circle.x, circle.y, circle.r, circle.color);
           }
         });
       }
+      function updateXP(baseAmount) {
+  const streakBonus = state.streak > 1
+    ? 10 * (state.streak - 1)
+    : 0;
+  const rawGain = baseAmount + streakBonus;
+  const xpGain  = rawGain * (state.xpMultiplier || 1);
 
-      function updateXP(amount) {
-        state.xp += amount;
-        let need = state.level*100;
-        while (state.xp >= need) {
-          state.xp -= need;
-          state.level++;
-          need = state.level*100;
-        }
-        xpEl.textContent = state.xp;
-        levelEl.textContent = state.level;
+  state.totalXP    += xpGain;
+  state.xpProgress += xpGain;
+
+  xpEl.textContent    = Math.floor(state.totalXP);
+  levelEl.textContent = state.level;
+
+  let threshold = state.level * 100;
+  while (state.xpProgress >= threshold) {
+    state.xpProgress -= threshold;
+    state.level++;
+    levelEl.textContent = state.level;
+    threshold = state.level * 100;
+      }
       }
 
       // --- Update function with power-up logic ---
       function update(dt) {
-        if (Date.now() - state.lastSpawn > state.baseSpawn / state.fallSpeed) {
+        // Gradually increase drop spawn rate: by level 10, 20% more drops (spawn interval 20% shorter)
+        let spawnMultiplier = 1 - 0.2 * Math.min(1, (state.level-1)/9);
+        let spawnInterval = state.baseSpawn * spawnMultiplier;
+        if (Date.now() - state.lastSpawn > spawnInterval / state.fallSpeed) {
           spawnCircle();
           state.lastSpawn = Date.now();
         }
@@ -694,14 +691,41 @@
             if (caught) {
               createParticles(c.x,c.y,c.color);
               // --- Power-up logic ---
-              if (c.type === 'slow') {
-                state.fallSpeed = Math.max(0.5, state.fallSpeed * 0.5);
-                showFeedback('Slow Motion!');
-                setTimeout(() => { state.fallSpeed = Math.min(5, state.fallSpeed * 2); }, 3000);
-              } else if (c.type === 'double') {
-                state.score += 1; // +1 extra point
-                showFeedback('Double Points!');
-                addCombo();
+              if (c.type === 'palette') {
+  // only trigger once per drop
+  if (!slowMoActive) {
+    slowMoActive = true;
+    // slow the fall speed
+    state._originalFallSpeed = state.fallSpeed;
+    state.fallSpeed          = Math.max(0.7, state.fallSpeed * 0.7);
+    // double XP for 2 seconds
+    state.xpMultiplier       = 2;
+    showFeedback('Slow Motion & XP×2!');
+    if (slowMoTimeout) clearTimeout(slowMoTimeout);
+    slowMoTimeout = setTimeout(() => {
+      state.fallSpeed     = state._originalFallSpeed;
+      state.xpMultiplier  = 1;    // back to normal XP
+      slowMoActive        = false;
+    }, 2000);
+  }
+              } else if (c.type === 'water') {
+  // always give at least one point
+  state.score += 1;
+
+  // speed-burst logic (2 second)
+  if (!state._speedBurstActive) {
+    state._speedBurstActive   = true;
+    state._originalFallSpeed2 = state.fallSpeed;
+    state.fallSpeed          *= 1.5;   // 50% faster
+
+    showFeedback('Speed Burst!');
+    setTimeout(() => {
+      state.fallSpeed         = state._originalFallSpeed2;
+      state._speedBurstActive = false;
+    }, 2000);
+  }
+
+  addCombo();
               } else if (c.type === 'bomb') {
                 state.lives = Math.max(0, state.lives - 2);
                 showFeedback('Bomb! -2 Lives');
@@ -711,7 +735,7 @@
                   state.score++;
                   state.streak++;
                   addCombo();
-                  updateXP(10 + (state.streak > 1 ? 10 * (state.streak - 1) : 0));
+                  updateXP(10);
                   targetColor = colors[Math.floor(Math.random()*colors.length)];
                   if (state.score > state.highScore) {
                     state.highScore = state.score;
@@ -763,7 +787,7 @@
         state.level = 1;
         state.streak = 0;
         state.lastSpawn = 0;
-        state.fallSpeed = 1.0;
+        state.fallSpeed = 2.0; // Start fast!
         scoreEl.textContent = '0';
         xpEl.textContent = '0';
         levelEl.textContent = '1';
@@ -774,6 +798,8 @@
         homeScreen.classList.add('hidden');
         hud.classList.remove('hidden');
         gameOver.classList.add('hidden');
+        circles.length = 0;
+        particles.length = 0;
         lastTime = performance.now();
         state.started = true;
         state.paused = false;
@@ -851,11 +877,158 @@
       // Restart
       restartBtn.onclick = () => {
         state.started = false;
+        circles.length = 0;
+        particles.length = 0;
         showHomeScreen(true, false);
       };
       // Initial state
       highScoreEl.textContent = state.highScore;
       showHomeScreen(true, false);
+
+      // --- Drawing Functions ---
+      function drawPaintDrop(x, y, r, color) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Find the gradient for this color
+  let idx = colors.indexOf(color);
+  let gradDef = dropGradients[idx >= 0 ? idx : 0];
+
+  // Drop shape: pointy top, bulbous bottom, little tail
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 1.35);
+  ctx.bezierCurveTo(
+    r * 0.12, -r * 1.0,
+    r * 0.95, r * 0.6,
+    0, r * .7
+  );
+  ctx.bezierCurveTo(
+    -r * 0.95, r * 0.6,
+    -r * 0.12, -r * 1.0,
+    0, -r * 1.5
+  );
+
+  // Gradient fill
+  let gradient = ctx.createLinearGradient(0, -r * 1.35, 0, r * 1.22);
+  gradient.addColorStop(0.0, gradDef.top);
+  gradient.addColorStop(0.25, gradDef.main);
+  gradient.addColorStop(1.0, gradDef.shadow);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  // Highlight (top left)
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.23, -r * 0.7, r * 0.13, r * 0.07, Math.PI / 4, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.fill();
+
+  // Highlight (bottom right)
+  ctx.beginPath();
+  ctx.ellipse(r * 0.18, r * 0.6, r * 0.09, r * 0.04, Math.PI / 6, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+      function drawInkBlot(x, y, r) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        // Central blob
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2);
+
+        // Blot arms
+        let arms = 8 + Math.floor(Math.random() * 4);
+        for (let i = 0; i < arms; i++) {
+          let angle = (i / arms) * Math.PI * 2 + Math.random() * 0.2;
+          let armLen = r * (0.2 + Math.random() * 0.7);
+          let armWidth = r * (0.09 + Math.random() * 0.12);
+
+          let ax = Math.cos(angle) * armLen;
+          let ay = Math.sin(angle) * armLen;
+
+          ctx.moveTo(0, 0);
+          ctx.quadraticCurveTo(
+            Math.cos(angle) * (armLen * 0.5 + Math.random() * r * 0.2),
+            Math.sin(angle) * (armLen * 0.5 + Math.random() * r * 0.2),
+            ax, ay
+          );
+          ctx.arc(ax, ay, armWidth, 0, Math.PI * 2);
+        }
+
+        ctx.closePath();
+        ctx.fillStyle = "#181818";
+        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowBlur = 18;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawWaterDrop(x, y, r) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.beginPath();
+        ctx.moveTo(0, -r * 1.35);
+        ctx.bezierCurveTo(
+    r * 0.12, -r * 1.0,
+    r * 0.95, r * 0.6,
+    0, r * .7
+  );
+  ctx.bezierCurveTo(
+    -r * 0.95, r * 0.6,
+    -r * 0.12, -r * 1.0,
+    0, -r * 1.5
+  );
+        let gradient = ctx.createRadialGradient(0, r * 0.7, r * 0.1, 0, 0, r);
+        gradient.addColorStop(0, '#c4ecf2');
+        gradient.addColorStop(0.25, '#80d8ff');
+        gradient.addColorStop(1, '#0288d1');
+        ctx.fillStyle = gradient;
+        ctx.shadowColor = "rgba(0,180,255,0.13)";
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        // Water highlight
+        ctx.beginPath();
+        ctx.ellipse(-r * 0.13, -r * 0.8, r * 0.13, r * 0.07, Math.PI / 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.38)';
+        ctx.fill();
+        ctx.restore();
+      }
+      function drawPaletteDrop(x, y, r) {
+        ctx.save();
+        ctx.font = `${r*2}px serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.globalAlpha = 0.96;
+        ctx.fillText("🎨", x, y+2);
+        ctx.globalAlpha = .75;
+        ctx.restore();
+      }
+      function adjustColor(color, amount) {
+        // Only works for hex colors like #rrggbb
+        if (!/^#[0-9a-f]{6}$/i.test(color)) return color;
+        let r = Math.max(0, Math.min(255, parseInt(color.substr(1,2),16) + amount));
+        let g = Math.max(0, Math.min(255, parseInt(color.substr(3,2),16) + amount));
+        let b = Math.max(0, Math.min(255, parseInt(color.substr(5,2),16) + amount));
+        return `rgb(${r},${g},${b})`;
+      }
+
+      // --- Touch controls (trackpad) ---
+      trackpad.addEventListener('touchstart', e => {
+        if (e.touches.length === 1) {
+          const rect = trackpad.getBoundingClientRect();
+          let x = e.touches[0].clientX - rect.left;
+          touchOffset = x - catcher.x;
+        }
+      });
+      trackpad.addEventListener('touchmove', e => {
+        e.preventDefault();
+        const rect = trackpad.getBoundingClientRect();
+        let x = e.touches[0].clientX - rect.left;
+        catcher.x = Math.max(0, Math.min(canvas.width - catcher.w, x - touchOffset));
+      }, { passive: false });
     });
   </script>
   <style>
@@ -890,6 +1063,28 @@
     }
     #mainSettingsPanel button[type="button"]:hover {
       background: #ddd;
+    }
+    #trackpad {
+      display: none;
+      width: 90vw;
+      max-width: 600px;
+      height: 90px;
+      margin: 0 auto 0 auto;
+      background: #e3e9f1;
+      border-radius: 0 0 16px 16px;
+      box-shadow: 0 2px 8px #0001;
+      position: relative;
+      touch-action: pan-x pan-y;
+      z-index: 2;
+      user-select: none;
+      text-align: center;
+      font-size: 1.1em;
+      color: #888;
+      letter-spacing: 0.02em;
+      line-height: 90px;
+    }
+    @media (pointer: coarse) {
+      #trackpad { display: block; }
     }
   </style>
 </body>

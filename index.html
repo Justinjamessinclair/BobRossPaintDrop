@@ -311,10 +311,12 @@
       </div>
     </div>
   </div>
-  <canvas id="gameCanvas" width="600" height="800"></canvas>
-  <div id="trackpad">Touch here to move the brush 🎨</div>
+  <canvas id="gameCanvas" width="600" height="1000"></canvas>
+  <div id="trackpad"></div>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
+      const SCALE = 1.5;
+
       // --- DOM refs ---
       const homeScreen = document.getElementById('homeScreen');
       const mainActionBtn = document.getElementById('mainActionBtn');
@@ -343,13 +345,14 @@
 
       // --- State ---
       let savedHighScore = parseInt(localStorage.getItem('highScore')) || 0;
+      let savedXP = parseInt(localStorage.getItem('totalXP')) || 0;
       let state = {
         score: 0,
         xpMultiplier: 1,
         lives: 3,
         maxLives: 3,
         xp: 0,
-        totalXP: 0,
+        totalXP: savedXP, // <-- use saved XP
         xpProgress: 0,
         level: 1,
         streak: 0,
@@ -364,7 +367,6 @@
       let gameLoopId, lastTime = 0;
       const colors = [
   '#f44336', // Red
-  '#ff9800', // Orange
   '#ffeb3b', // Yellow
   '#4caf50', // Green
   '#2196f3',  // Blue
@@ -372,7 +374,6 @@
 ];
 const dropGradients = [
   { top: '#ff7961', main: '#f44336', shadow: '#b71c1c' }, // Red
-  { top: '#ffd180', main: '#ff9800', shadow: '#e65100' }, // Orange
   { top: '#fffde7', main: '#ffeb3b', shadow: '#fbc02d' }, // Yellow
   { top: '#b9f6ca', main: '#4caf50', shadow: '#1b5e20' }, // Green
   { top: '#82b1ff', main: '#2196f3', shadow: '#0d47a1' }, // Blue
@@ -383,6 +384,9 @@ const dropGradients = [
       // --- Slow-mo palette drop state ---
       let slowMoTimeout = null;
       let slowMoActive = false;
+
+      // Add this near the top with other state variables:
+      let speedBurstTimeout = null;
 
       // --- Controls Instructions ---
       function isMobile() {
@@ -397,8 +401,8 @@ const dropGradients = [
         <div class="tip">Catch the <span style="font-weight:bold;">target color</span> to score, catch the wrong color and lose a life!</div>
             <h2>Power-Ups & Hazards</h2>
   <ul>
-    <li>🎨 <b>Paint Palette:</b> Slow Motion + 2× XP</li>
-    <li>💧 <b>Water Drop:</b> Speed Burst + 2× XP</li>
+    <li>🎨 <b>Paint Palette:</b> Slow Motion</li>
+    <li>💧 <b>Water Drop:</b> Speed Burst</li>
     <li>⚫️ <b>Ink Blot:</b> Lose 2 Lives</li>
       `;
       const mobileControls = `
@@ -410,8 +414,8 @@ const dropGradients = [
             </ul>
   <h2>Power-Ups & Hazards</h2>
   <ul>
-    <li>🎨 <b>Paint Palette:</b> Slow Motion + 2× XP</li>
-    <li>💧 <b>Water Drop:</b> Speed Burst + 2× XP</li>
+    <li>🎨 <b>Paint Palette:</b> Slow Motion</li>
+    <li>💧 <b>Water Drop:</b> Speed Burst</li>
     <li>⚫️ <b>Ink Blot:</b> Lose 2 Lives</li>
         </ul>
         
@@ -452,10 +456,10 @@ const dropGradients = [
 
       // --- Game logic ---
       const catcher = {
-        x: canvas.width/2 - 20,
-        y: canvas.height - 80,
-        w: 40,
-        h: 80,
+        x: canvas.width/2 - 30 * SCALE,
+        y: canvas.height - 120 * SCALE,
+        w: 10 * SCALE,
+        h: 170 * SCALE,
         velX: 0,
         speed: 8
       };
@@ -519,9 +523,9 @@ const dropGradients = [
         else if (roll < 0.18) type = 'bomb'; // 6% chance: black inkblot
         let baseSpd = 2 + state.score*0.05;
         circles.push({
-          x: Math.random()*(canvas.width-30)+15,
-          y: -20,
-          r: 15 + Math.random()*10,
+          x: Math.random()*(canvas.width-45*SCALE)+22.5*SCALE,
+          y: -30 * SCALE,
+          r: (15 + Math.random()*10) * SCALE,
           baseSpd,
           spd: baseSpd * state.fallSpeed,
           color: type === 'palette'
@@ -566,8 +570,8 @@ const dropGradients = [
 
   // 2) Draw wooden handle base with gradient
   ctx.beginPath();
-  ctx.roundRect(-8, -35, 16, 45, 5);
-  let handleGrad = ctx.createLinearGradient(-8, -35, 8, 10);
+  ctx.roundRect(-8 * SCALE, -35 * SCALE, 16 * SCALE, 45 * SCALE, 5 * SCALE);
+  let handleGrad = ctx.createLinearGradient(-8 * SCALE, -35 * SCALE, 8 * SCALE, 10 * SCALE);
   handleGrad.addColorStop(0, '#8d6e63');
   handleGrad.addColorStop(1, '#5d4037');
   ctx.fillStyle = handleGrad;
@@ -576,7 +580,7 @@ const dropGradients = [
   // 3) Clip to that handle area, then draw grain & speckles
   ctx.save();
   ctx.beginPath();
-  ctx.roundRect(-8, -35, 16, 45, 5);
+  ctx.roundRect(-8 * SCALE, -35 * SCALE, 16 * SCALE, 45 * SCALE, 5 * SCALE);
   ctx.clip();
 
   //   a) Wavy grain lines
@@ -585,21 +589,21 @@ ctx.lineWidth = 1;
 for (let xx = -6; xx <= 6; xx += 4) {
   ctx.beginPath();
   let phase = Math.random() * Math.PI * 2;
-  ctx.moveTo(xx, -35);
+  ctx.moveTo(xx * SCALE, -35 * SCALE);
   // step down the handle height
   for (let yy = -35; yy <= 10; yy += 2) {
     // sinuous x-offset based on vertical position
     let xOff = Math.sin(((yy + 35) / 45) * Math.PI + phase) * .5;
-    ctx.lineTo(xx + xOff, yy);
+    ctx.lineTo((xx + xOff) * SCALE, yy * SCALE);
   }
   ctx.stroke();
 }
 
   //   b) Tiny random speckles
   for (let i = 0; i < 25; i++) {
-    let rx = -8 + Math.random() * 16;
-    let ry = -35 + Math.random() * 45;
-    let sz = Math.random() * 1.5;
+    let rx = (-8 + Math.random() * 16) * SCALE;
+    let ry = (-35 + Math.random() * 45) * SCALE;
+    let sz = Math.random() * 1.5 * SCALE;
     ctx.fillStyle = 'rgba(0,0,0,0.12)';
     ctx.fillRect(rx, ry, sz, sz);
   }
@@ -607,8 +611,8 @@ for (let xx = -6; xx <= 6; xx += 4) {
 
   // 4) Draw metal ferrule
   ctx.beginPath();
-  ctx.roundRect(-10, 10, 20, 15, 2);
-  let metalGrad = ctx.createLinearGradient(-10, 10, 10, 25);
+  ctx.roundRect(-10 * SCALE, 10 * SCALE, 20 * SCALE, 15 * SCALE, 2 * SCALE);
+  let metalGrad = ctx.createLinearGradient(-10 * SCALE, 10 * SCALE, 10 * SCALE, 25 * SCALE);
   metalGrad.addColorStop(.5, '#e0e0e0');
   metalGrad.addColorStop(1, '#9e9e9e');
   ctx.fillStyle = metalGrad;
@@ -616,22 +620,10 @@ for (let xx = -6; xx <= 6; xx += 4) {
 
   // 5) Draw the paint‐colored bristles
   ctx.beginPath();
-  ctx.moveTo(-10, 25);
-  ctx.quadraticCurveTo(0, 45, 10, 25);
+  ctx.moveTo(-10 * SCALE, 25 * SCALE);
+  ctx.quadraticCurveTo(0, 45 * SCALE, 10 * SCALE, 25 * SCALE);
   ctx.fillStyle = targetColor;
   ctx.fill();
-
-  // 6) Add fine hair strokes on top of the bristles
-  ctx.strokeStyle = adjustColor(targetColor, -30);
-  ctx.lineWidth = .8;
-  for (let i = 0; i < 6; i++) {
-    let tx = -8 + (16 * i/5) + (Math.random()-0.5)*1.5;
-    let ty = 15 + (Math.random()*10);
-    ctx.beginPath();
-    ctx.moveTo(tx, 20);
-    ctx.lineTo(tx + (Math.random()-0.5)*3, ty + (Math.random()*4));
-    ctx.stroke();
-  }
 
   ctx.restore(); // back to canvas default
 }
@@ -649,26 +641,24 @@ for (let xx = -6; xx <= 6; xx += 4) {
           }
         });
       }
-      function updateXP(baseAmount) {
-  const streakBonus = state.streak > 1
-    ? 10 * (state.streak - 1)
-    : 0;
-  const rawGain = baseAmount + streakBonus;
-  const xpGain  = rawGain * (state.xpMultiplier || 1);
+      function updateXP() {
+  state.totalXP += 10;
+  state.xpProgress += 10;
 
-  state.totalXP    += xpGain;
-  state.xpProgress += xpGain;
-
-  xpEl.textContent    = Math.floor(state.totalXP);
+  xpEl.textContent = Math.floor(state.totalXP);
   levelEl.textContent = state.level;
 
-  let threshold = state.level * 100;
+  let threshold = state.level * 10;
   while (state.xpProgress >= threshold) {
     state.xpProgress -= threshold;
     state.level++;
     levelEl.textContent = state.level;
     threshold = state.level * 100;
-      }
+    state.fallSpeed *= 1.05;
+    state.baseFallSpeed = state.fallSpeed;
+  }
+  // Save XP persistently
+  localStorage.setItem('totalXP', state.totalXP);
       }
 
       // --- Update function with power-up logic ---
@@ -682,11 +672,24 @@ for (let xx = -6; xx <= 6; xx += 4) {
         }
         catcher.x = Math.max(0, Math.min(canvas.width-catcher.w, catcher.x + catcher.velX * catcher.speed * (dt/16)));
         for (let i=circles.length-1; i>=0; i--) {
-          let c = circles[i];
-          c.spd = c.baseSpd * state.fallSpeed;
-          c.y += c.spd;
-          let caught = c.y+c.r >= catcher.y && c.x+c.r >= catcher.x && c.x-c.r <= catcher.x+catcher.w;
-          let missed = c.y-c.r > canvas.height;
+  let c = circles[i];
+  c.spd = c.baseSpd * state.fallSpeed;
+  c.y += c.spd;
+
+  // Tip of bristles area (at the top of the brush, before rotation)
+  const tipLeft   = catcher.x + (catcher.w/2 - 10*SCALE);
+  const tipRight  = catcher.x + (catcher.w/2 + 10*SCALE);
+  const tipTop    = catcher.y + 25*SCALE + 40*SCALE;
+  const tipBottom = tipTop + 10*SCALE;
+
+  // Only catch if the drop overlaps the tip area
+  let caught =
+    c.x + c.r > tipLeft &&
+    c.x - c.r < tipRight &&
+    c.y + c.r > tipTop &&
+    c.y - c.r < tipBottom;
+
+  let missed = c.y-c.r > canvas.height;
           if (caught || missed) {
             if (caught) {
               createParticles(c.x,c.y,c.color);
@@ -700,7 +703,7 @@ for (let xx = -6; xx <= 6; xx += 4) {
     state.fallSpeed          = Math.max(0.7, state.fallSpeed * 0.7);
     // double XP for 2 seconds
     state.xpMultiplier       = 2;
-    showFeedback('Slow Motion & XP×2!');
+    showFeedback('Slow Motion!');
     if (slowMoTimeout) clearTimeout(slowMoTimeout);
     slowMoTimeout = setTimeout(() => {
       state.fallSpeed     = state._originalFallSpeed;
@@ -709,21 +712,19 @@ for (let xx = -6; xx <= 6; xx += 4) {
     }, 2000);
   }
               } else if (c.type === 'water') {
-  // always give at least one point
   state.score += 1;
 
-  // speed-burst logic (2 second)
-  if (!state._speedBurstActive) {
-    state._speedBurstActive   = true;
-    state._originalFallSpeed2 = state.fallSpeed;
-    state.fallSpeed          *= 1.5;   // 50% faster
+  // speed-burst logic (1 second, always resets)
+  if (speedBurstTimeout) clearTimeout(speedBurstTimeout);
+  // Save the "base" fall speed (from level progression)
+  if (typeof state.baseFallSpeed === "undefined") state.baseFallSpeed = state.fallSpeed;
+  state.fallSpeed = state.baseFallSpeed * 1.5; // 50% faster
 
-    showFeedback('Speed Burst!');
-    setTimeout(() => {
-      state.fallSpeed         = state._originalFallSpeed2;
-      state._speedBurstActive = false;
-    }, 2000);
-  }
+  showFeedback('Speed Burst!');
+  speedBurstTimeout = setTimeout(() => {
+    state.fallSpeed = state.baseFallSpeed;
+    speedBurstTimeout = null;
+  }, 1000);
 
   addCombo();
               } else if (c.type === 'bomb') {
@@ -787,7 +788,7 @@ for (let xx = -6; xx <= 6; xx += 4) {
         state.level = 1;
         state.streak = 0;
         state.lastSpawn = 0;
-        state.fallSpeed = 2.0; // Start fast!
+        state.fallSpeed = 1.0; // Start fast!
         scoreEl.textContent = '0';
         xpEl.textContent = '0';
         levelEl.textContent = '1';
@@ -803,10 +804,15 @@ for (let xx = -6; xx <= 6; xx += 4) {
         lastTime = performance.now();
         state.started = true;
         state.paused = false;
+  // DO NOT reset state.xp, state.xpProgress, or state.level here!
+  xpEl.textContent = Math.floor(state.totalXP);
+  levelEl.textContent = state.level;
+  gameLoopId = requestAnimationFrame(gameLoop);
         gameLoopId = requestAnimationFrame(gameLoop);
       }
       function resumeGame() {
         state.paused = false;
+        state.baseFallSpeed = state.fallSpeed;
         showHomeScreen(false);
         hud.classList.remove('hidden');
         lastTime = performance.now();
@@ -914,18 +920,6 @@ for (let xx = -6; xx <= 6; xx += 4) {
   gradient.addColorStop(0.25, gradDef.main);
   gradient.addColorStop(1.0, gradDef.shadow);
   ctx.fillStyle = gradient;
-  ctx.fill();
-
-  // Highlight (top left)
-  ctx.beginPath();
-  ctx.ellipse(-r * 0.23, -r * 0.7, r * 0.13, r * 0.07, Math.PI / 4, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.38)';
-  ctx.fill();
-
-  // Highlight (bottom right)
-  ctx.beginPath();
-  ctx.ellipse(r * 0.18, r * 0.6, r * 0.09, r * 0.04, Math.PI / 6, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
   ctx.fill();
 
   ctx.restore();
@@ -1068,7 +1062,7 @@ for (let xx = -6; xx <= 6; xx += 4) {
       display: none;
       width: 90vw;
       max-width: 600px;
-      height: 90px;
+      height: 45px;
       margin: 0 auto 0 auto;
       background: #e3e9f1;
       border-radius: 0 0 16px 16px;
@@ -1085,6 +1079,7 @@ for (let xx = -6; xx <= 6; xx += 4) {
     }
     @media (pointer: coarse) {
       #trackpad { display: block; }
+      
     }
   </style>
 </body>

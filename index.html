@@ -286,7 +286,8 @@
       <h2 class="pause-title">⏸️ Paused</h2>
       <div id="pauseControlsInstructions"></div>
       <button id="pauseBtn" class="pause-btn">Resume</button>
-      <button id="settingsBtn" class="pause-btn">⚙️ Settings</button>
+      <button id="settingsBtn" class="pause-btn">⚙️ Settings</button>'
+      <button id="openStoreBtn" class="pause-btn">🛒 Store</button>'
     </div>
   </div>
   <div id="settingsPanel">
@@ -313,11 +314,41 @@
   </div>
   <canvas id="gameCanvas" width="600" height="1000"></canvas>
   <div id="trackpad"></div>
+  <!-- XP Store UI -->
+  <div id="storeScreen" class="hidden" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:30;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);">
+    <div style="background:#fff;border-radius:18px;box-shadow:0 4px 24px #0003;padding:32px 28px;min-width:300px;max-width:90vw;text-align:center;">
+      <h2 style="margin-top:0;">🛒 XP Store</h2>
+      <div style="margin-bottom:18px;">Your XP: <span id="storeXp"></span></div>
+      <button class="store-btn" onclick="buyLife()">❤️ Extra Life (100 XP)</button><br><br>
+      <button class="store-btn" onclick="buySlowMo()">🎨 Slow-Mo (150 XP)</button><br><br>
+      <button class="store-btn" onclick="buyBrush()">🖌️ Fancy Brush (200 XP)</button><br><br>
+      <button class="store-btn" onclick="closeStore()">Close</button>
+      <div id="storeMsg" style="margin-top:12px;color:#c00;font-weight:bold;"></div>
+    </div>
+  </div>
+  <style>
+    .store-btn {
+      font-size: 1.1em;
+      padding: 10px 24px;
+      border-radius: 12px;
+      background: #222;
+      color: #fff;
+      border: none;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .store-btn:hover { background: #444; }
+  </style>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const SCALE = 1.5;
 
       // --- DOM refs ---
+      document.addEventListener('DOMContentLoaded', () => {
+  const openStoreBtn = document.getElementById('openStoreBtn');
+  if (openStoreBtn) openStoreBtn.onclick = openStore;
+});
       const homeScreen = document.getElementById('homeScreen');
       const mainActionBtn = document.getElementById('mainActionBtn');
       const mainSettingsBtn = document.getElementById('mainSettingsBtn');
@@ -1024,6 +1055,48 @@ for (let xx = -6; xx <= 6; xx += 4) {
         catcher.x = Math.max(0, Math.min(canvas.width - catcher.w, x - touchOffset));
       }, { passive: false });
     });
+    // --- Store Logic ---
+    function openStore() {
+      document.getElementById('storeXp').textContent = state.totalXP;
+      document.getElementById('storeMsg').textContent = '';
+      document.getElementById('storeScreen').classList.remove('hidden');
+    }
+    function closeStore() {
+      document.getElementById('storeScreen').classList.add('hidden');
+    }
+
+    function buyLife() {
+      if (state.totalXP < 100) return document.getElementById('storeMsg').textContent = "Not enough XP!";
+      state.totalXP -= 100;
+      state.lives = Math.min(state.maxLives, state.lives + 1);
+      xpEl.textContent = Math.floor(state.totalXP);
+      document.getElementById('storeXp').textContent = state.totalXP;
+      localStorage.setItem('totalXP', state.totalXP);
+      document.getElementById('storeMsg').textContent = "Extra life added!";
+      livesEl.textContent = state.lives;
+    }
+    function buySlowMo() {
+      if (state.totalXP < 150) return document.getElementById('storeMsg').textContent = "Not enough XP!";
+      state.totalXP -= 150;
+      // Activate slow-mo for 2 seconds
+      state._originalFallSpeed = state.fallSpeed;
+      state.fallSpeed = Math.max(0.7, state.fallSpeed * 0.7);
+      setTimeout(() => { state.fallSpeed = state._originalFallSpeed; }, 2000);
+      xpEl.textContent = Math.floor(state.totalXP);
+      document.getElementById('storeXp').textContent = state.totalXP;
+      localStorage.setItem('totalXP', state.totalXP);
+      document.getElementById('storeMsg').textContent = "Slow-Mo activated!";
+    }
+    function buyBrush() {
+      if (state.totalXP < 200) return document.getElementById('storeMsg').textContent = "Not enough XP!";
+      state.totalXP -= 200;
+      state.hasFancyBrush = true;
+      xpEl.textContent = Math.floor(state.totalXP);
+      document.getElementById('storeXp').textContent = state.totalXP;
+      localStorage.setItem('totalXP', state.totalXP);
+      document.getElementById('storeMsg').textContent = "You bought a fancy brush!";
+      // You can use state.hasFancyBrush in your drawCatcher() to change the brush appearance
+    }
   </script>
   <style>
     #feedback {
@@ -1062,7 +1135,7 @@ for (let xx = -6; xx <= 6; xx += 4) {
       display: none;
       width: 90vw;
       max-width: 600px;
-      height: 45px;
+      height: 0px;
       margin: 0 auto 0 auto;
       background: #e3e9f1;
       border-radius: 0 0 16px 16px;
